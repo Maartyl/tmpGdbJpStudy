@@ -20,7 +20,8 @@ interface RwSlot {
 // - multiple READ-ONLY slots can execute at the same time
 class RwExecutor(scope: CoroutineScope) {
 
-  //private val queue = ArrayDeque<RwSlot>()
+  //is the buffer even useful? probably does not hurt
+  // - some explicit buffer will be needed, if I allow out-of-order (prioritized) execution - future
   private val queue = Channel<RwSlot>(100)
 
   suspend fun enqueue(slot: RwSlot) {
@@ -30,49 +31,18 @@ class RwExecutor(scope: CoroutineScope) {
   //for now a simple variant
   //future: also run CHEAP RO even if some RW in queue
 
-//  private val mgr = scope.launch {
-//    while (true) {
-//      val tx = coroutineScope {
-//        for (s in queue) {
-//          if (!s.readOnly)
-//            return@coroutineScope s
-//          else
-//          //like this: if readOnly can start many in parallel
-//            launch { s.startAndJoin() }
-//        }
-//        null
-//      }
-//
-//      //always only one at a time
-//      tx?.startAndJoin()
-//
-//    }
-//  }
-
-  //for now a simple variant
-  //future: also run CHEAP RO even if some RW in queue
-  //not sure if this one works - lets try it
-  private val mgr2 = scope.launch {
-
-    //maybe not even needed? just wait for ALL MY CHILDREN each time?
-    //var readOnlys = CompletableDeferred<Unit>(currentCoroutineContext().job)
+  private val mgr = scope.launch {
 
     val myJob = currentCoroutineContext().job
     for (s in queue) {
       if (s.readOnly) { //those can run in parallel
         launch { s.startAndJoin() }
       } else {
-        //this could be replaced with "joinAllChildren" ... but I probably want to purge them anyway
-        //- but maybe they are removed automatically, once completed? should be...
-        //TODO: remove dbg
-        println("RwExecutor.childWaitCount=${myJob.children.count()}")
+        //wait for all children == readOnly
         myJob.children.forEach { it.join() }
-        //readOnlys.await() //wait for readOnlys so far to finish
-        //readOnlys = CompletableDeferred<Unit>(currentCoroutineContext().job) //clear for next batch
+
         s.startAndJoin() //run rw sequentially
       }
     }
   }
-
-
 }

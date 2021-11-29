@@ -1,5 +1,6 @@
 package com.github.maartyl.jp_import
 
+import com.github.maartyl.gdb.GRef
 import com.github.maartyl.gdb.put
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -38,16 +39,17 @@ data class Kanjidic2(
   val strokeCount: Int,  //or -1
 
   val ids: Set<String>,
-  val variants: Set<String>,
+  val variants: Set<GRef<Kanjidic2>>,
+  val variantsIds: Set<String>,
+  val variantsUcs: Set<Int>,
 
-  //this kanji is ITSELF a NAMED RADICAL
-  val radNames: List<String>,
+  //if this kanji is ITSELF a NAMED RADICAL
+  val radNames: Set<String>,
 
-  //these are effectively SETS but lists are cheaper...
-  val meanings: List<String>,
+  val meanings: Set<String>,
   //TODO: do I need separation, or is kana-type enough? - "containsKatakana->on"
-  val readingsKun: List<String>,
-  val readingsOn: List<String>,
+  val readingsKun: Set<String>,
+  val readingsOn: Set<String>,
 
 
   ) : GImporting()
@@ -139,6 +141,13 @@ fun readKanjidic2(pathXmlFile: String): Flow<Kanjidic2> {
   }
 }
 
+//optimize mem usage
+private fun <T> Set<T>.optimize() = when (size) {
+  0 -> setOf() //all share singleton
+  1 -> setOf(this.first()) //duinno if this one is needed
+  else -> this
+}
+
 private fun <T> MutableSet<T>?.add(t: T): MutableSet<T> {
   return (this ?: mutableSetOf()).also { it.add(t) }
 }
@@ -157,17 +166,18 @@ fun processKanjidic2(kg: XGroup): Kanjidic2 {
 
   var strokeCount = -1 //not defined for all (but almost)
 
-  val ids: MutableSet<String> = mutableSetOf()
-  val variants: MutableSet<String> = mutableSetOf()
+  val ids = mutableSetOf<String>()
+  val variantsIds = mutableSetOf<String>()
+  val variantsUcs = mutableSetOf<Int>()
 
   //this kanji is ITSELF a NAMED RADICAL
-  val radNames: MutableList<String> = mutableListOf()
+  val radNames = mutableSetOf<String>()
 
   //these are effectively SETS but lists are cheaper...
-  val meanings: MutableList<String> = mutableListOf()
+  val meanings = mutableSetOf<String>()
   //TODO: do I need separation, or is kana-type enough? - "containsKatakana->on"
-  val readingsKun: MutableList<String> = mutableListOf()
-  val readingsOn: MutableList<String> = mutableListOf()
+  val readingsKun = mutableSetOf<String>()
+  val readingsOn = mutableSetOf<String>()
 
   for (e in kg.elms) {
     //println("processKanjidic2 ${e.name}")
@@ -205,9 +215,12 @@ fun processKanjidic2(kg: XGroup): Kanjidic2 {
       "q_code" -> {
         //PASS: for now not interesting
         e.attrs.forEach { (t, u) ->
+          //is deroo unique ?
           assert(t == "qc_type")
           // SINGLE:  deroo, sh_desc
           // MULTI:   four_corner, skip
+          if (u == "deroo")
+            variantsIds.add("$u:${e.rq}")
         }
       }
       //"dic_ref" -> {} //handled later: being unique-key is not useful
@@ -244,8 +257,12 @@ fun processKanjidic2(kg: XGroup): Kanjidic2 {
       "variant" -> {
         e.attrs.forEach { (t, u) ->
           assert(t == "var_type")
-          val x = if (u == "nelson_c") "nc" else u
-          variants.add("$x:${e.rq}")
+          if (u == "ucs") {
+            variantsUcs.add(e.rq.toInt(16))
+          } else {
+            val x = if (u == "nelson_c") "nc" else u
+            variantsIds.add("$x:${e.rq}")
+          }
         }
 
       } //pass: future
@@ -280,12 +297,14 @@ fun processKanjidic2(kg: XGroup): Kanjidic2 {
     freq = freq,
     grade = grade,
     strokeCount = strokeCount,
-    ids = ids,
-    variants = variants,
-    radNames = radNames,
-    meanings = meanings,
-    readingsKun = readingsKun,
-    readingsOn = readingsOn,
+    ids = ids.optimize(),
+    variants = setOf(),
+    variantsIds = variantsIds.optimize(),
+    variantsUcs = variantsUcs.optimize(),
+    radNames = radNames.optimize(),
+    meanings = meanings.optimize(),
+    readingsKun = readingsKun.optimize(),
+    readingsOn = readingsOn.optimize(),
   )
 }
 
@@ -610,7 +629,7 @@ suspend fun GdbImporting.findVariants() = withContext(Dispatchers.Default) {
       } else
 
         launch {
-          val all = kn.variants.flatMap { vid ->
+          val all = kn.variantsIds.flatMap { vid ->
             kdic2.ids.find(this@mutate, vid).mapNotNull { vvRef ->
               val vv = deref(vvRef)
               if (vv == null) {

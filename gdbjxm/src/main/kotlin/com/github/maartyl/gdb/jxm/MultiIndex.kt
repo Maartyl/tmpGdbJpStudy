@@ -4,12 +4,17 @@ import com.github.maartyl.gdb.GDbSnap
 import com.github.maartyl.gdb.GRangeIndex
 import com.github.maartyl.gdb.GRef
 import com.github.maartyl.gdb.NodeBase
+import org.mapdb.DataInput2
+import org.mapdb.DataOutput2
 import org.mapdb.Serializer
-import org.mapdb.serializer.SerializerArrayTuple
+import org.mapdb.serializer.GroupSerializer
+import org.mapdb.serializer.GroupSerializerObjectArray
 
 //private val seriTupleBytesStr = SerializerArrayTuple(Serializer.BYTE_ARRAY, Serializer.STRING)
-private val seriTupleStrStr = SerializerArrayTuple(Serializer.STRING, Serializer.STRING)
-private val seriTupleLongStr = SerializerArrayTuple(Serializer.LONG, Serializer.STRING)
+//private val seriTupleStrStr = SerializerArrayTuple(Serializer.STRING, Serializer.STRING)
+//private val seriTupleLongStr = SerializerArrayTuple(Serializer.LONG, Serializer.STRING)
+private val seriTupleStrStr = SerializerKV<String>(Serializer.STRING, Serializer.STRING)
+private val seriTupleLongStr = SerializerKV<Long>(Serializer.LONG, Serializer.STRING)
 
 
 internal fun <Key : Any, Node : NodeBase> multiIndexStr(
@@ -26,13 +31,22 @@ internal fun <Key : Any, Node : NodeBase> multiIndexLong(
   seri: (Key) -> Long,
 ): MultiIndex<Key, Long, Node> = MultiIndex(g, name, view, seri, seriTupleLongStr)
 
+
+// k == seri(Key), ref == r.id
+// KeyB must have well-defined equals + Comparable
+// cmpBias is for RANGE queries (== all searching in MULTIMAP) - only applies to KEY
+// - allows to insert values "around" / "between" possible real values
+// - this obj itself is NOT comparable in arbitrary contexts
+// - is part of MULTIMAP impl
+internal data class KR<KeyB : Comparable<KeyB>>(val k: KeyB, val ref: String, val cmpBias: Byte = 0)
+
 //todo MultiMap - reverse and group indexes, possibly more
-internal class MultiIndex<Key : Any, KeyB : Any, Node : NodeBase>(
+internal class MultiIndex<Key : Any, KeyB : Comparable<KeyB>, Node : NodeBase>(
   val g: GDbImpl,
   override val name: String,
   val view: (GRef<*>, NodeBase, MutableCollection<Key>) -> Unit?,
   val seri: (Key) -> KeyB,
-  tupleSerializer: SerializerArrayTuple,
+  tupleSerializer: GroupSerializer<KR<KeyB>>,
 ) : ChangeObserver, GRangeIndex<Key, Node> {
 
   //TODO: delta packing tuples, since key can repeat many times ?
@@ -48,10 +62,12 @@ internal class MultiIndex<Key : Any, KeyB : Any, Node : NodeBase>(
   //private fun bs(k: Key) = g.proto.encodeToByteArray(seri, k)
   private fun bs(k: Key) = seri(k)
 
-  private fun pack(k: Key, ref: Ref<*>) = arrayOf(bs(k), ref.id)
+  private fun pack(k: Key, ref: Ref<*>) = KR<KeyB>(bs(k), ref.id)
 
-  private val txToAdd = mutableSetOf<Array<Any>>()
-  private val txToRemove = mutableSetOf<Array<Any>>()
+  //TODO: how is equals implemented for lists? - may be wrong? - INDEED it needs Arrays.equals - differs
+  // NOPE! a.equals(b) is FALSE even if contents the same
+  private val txToAdd = mutableSetOf<KR<KeyB>>()
+  private val txToRemove = mutableSetOf<KR<KeyB>>()
   override fun txPreCommit(tx: TxImpl) {
     multimap.addAll(txToAdd)
     multimap.removeAll(txToRemove)
@@ -63,6 +79,8 @@ internal class MultiIndex<Key : Any, KeyB : Any, Node : NodeBase>(
     val p = pack(k, ref)
     txToRemove.remove(p) //if previous change in this tx was removing it - cancel
     txToAdd.add(p)
+    //btw. another node cannot remove this by accident: the ref "owns" this entry
+    // (as no other node could have created it)
   }
 
   private fun remove(k: Key, ref: Ref<*>) {
@@ -112,8 +130,61 @@ internal class MultiIndex<Key : Any, KeyB : Any, Node : NodeBase>(
 
   override fun find(snap: GDbSnap, key: Key): Sequence<GRef<Node>> {
     val b = bs(key)
-    val matchSet = multimap.subSet(arrayOf<Any?>(b), arrayOf<Any?>(b, null))
-    return matchSet.asSequence().map { g.internRef(it[1] as String) }
+    val matchSet = multimap.subSet(KR(b, "", -1), KR(b, "", 1))
+    return matchSet.asSequence().map { g.internRef(it.ref) }
   }
+
+}
+
+
+private class SerializerKV<KeyB : Comparable<KeyB>>(
+  val serK: Serializer<KeyB>,
+  val serR: Serializer<String>,
+) : GroupSerializerObjectArray<KR<KeyB>>() {
+
+  override fun deserialize(input: DataInput2, available: Int): KR<KeyB> {
+    return KR(serK.deserialize(input, available), serR.deserialize(input, available))
+  }
+
+  override fun serialize(out: DataOutput2, value: KR<KeyB>) {
+    serK.serialize(out, value.k)
+    serR.serialize(out, value.ref)
+  }
+
+  override fun isTrusted(): Boolean {
+    return serK.isTrusted && serR.isTrusted
+  }
+
+  override fun compare(first: KR<KeyB>, second: KR<KeyB>): Int {
+    val ck = first.k.compareTo(second.k)
+    if (ck != 0) return ck
+
+    //ref == values are NEVER (?) compared
+    // - if they return equal ... is it a problem? I don't care about their order...
+    // ! the TREE might require absolute order, and assume equal keys are equal
+    // - actually: DEFINITELY needed: how else would it efficiently know, if it already stored it or not?
+
+    val cb = first.cmpBias.compareTo(second.cmpBias)
+    if (cb != 0) return cb
+
+    //better SAFE than SORRY
+    return first.ref.compareTo(second.ref)
+  }
+
+  //tuple impl that worked with  subSet(arrayOf<Any?>(b), arrayOf<Any?>(b, null))
+  //
+//  fun compare(o1: Array<Any?>, o2: Array<Any?>): Int {
+//    val len = Math.min(o1.size, o2.size)
+//    for (i in 0 until len) {
+//      val a1 = o1[i]
+//      val a2 = o2[i]
+//      if (a1 === a2) continue
+//      if (a1 == null) return 1
+//      if (a2 == null) return -1
+//      val res: Int = comp.get(i).compare(a1, a2)
+//      if (res != 0) return res
+//    }
+//    return Integer.compare(o1.size, o2.size)
+//  }
 
 }

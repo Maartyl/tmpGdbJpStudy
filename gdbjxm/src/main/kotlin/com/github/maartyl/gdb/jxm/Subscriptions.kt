@@ -2,7 +2,6 @@ package com.github.maartyl.gdb.jxm
 
 import com.github.maartyl.gdb.NodeBase
 import kotlinx.coroutines.channels.SendChannel
-import kotlinx.coroutines.channels.trySendBlocking
 
 internal class SubscriptionRef<TR : NodeBase>(
   val g: GDbImpl,
@@ -32,7 +31,7 @@ internal class SubscriptionRef<TR : NodeBase>(
     if (changeSeen) {
       //must not suspend (DROP_OLDEST)
       // if closed fine: will be unregistered soon
-      emits.trySendBlocking(changedTo)
+      emits.trySend(changedTo)
       reset()
     }
   }

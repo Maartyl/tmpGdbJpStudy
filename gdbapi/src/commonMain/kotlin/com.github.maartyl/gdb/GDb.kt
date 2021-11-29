@@ -1,6 +1,10 @@
 package com.github.maartyl.gdb
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -55,6 +59,7 @@ interface GRangeIndex<TKey : Any, TN : NodeBase> : GIndex<TKey, TN> {
 //  //fun deriveRef(key: TKey): GRef<TN>
 //}
 
+//NAME: maybe IDENTITY index ? - as the key is all-time identity of the node ...
 // is UniqueIndex, but skipping dealing with it for now
 interface GPrimaryStrIndex<TN : NodeBase> : GIndex<String, TN> {
 
@@ -80,26 +85,26 @@ fun <TN : NodeBase> GDbTx.put(idx: GPrimaryStrIndex<TN>, node: TN): GRef<TN> {
 
 
 @Suppress("UNCHECKED_CAST")
-inline fun <reified TL : NodeBase, TR : Any> GDbBuilder.makeIndexStr(
+inline fun <reified TL : NodeBase, TR : Any> GDbBuilder.reverseIndexStr(
   name: String, noinline seri: (TR) -> String,
   crossinline view: (GRef<TL>, TL, MutableCollection<TR>) -> Unit?,
-): GRangeIndex<TR, TL> = makeIndexRawStr<TR>(name, seri) { r, v, c ->
+): GRangeIndex<TR, TL> = reverseIndexRawStr<TR>(name, seri) { r, v, c ->
   (v as? TL)?.let { view(r as GRef<TL>, it, c) }
 } as GRangeIndex<TR, TL>
 
 @Suppress("UNCHECKED_CAST")
-inline fun <reified TL : NodeBase, TR : Any> GDbBuilder.makeIndexLong(
+inline fun <reified TL : NodeBase, TR : Any> GDbBuilder.reverseIndexLong(
   name: String, noinline seri: (TR) -> Long,
   crossinline view: (GRef<TL>, TL, MutableCollection<TR>) -> Unit?,
-): GRangeIndex<TR, TL> = makeIndexRawLong<TR>(name, seri) { r, v, c ->
+): GRangeIndex<TR, TL> = reverseIndexRawLong<TR>(name, seri) { r, v, c ->
   (v as? TL)?.let { view(r as GRef<TL>, it, c) }
 } as GRangeIndex<TR, TL>
 
 @Suppress("UNCHECKED_CAST")
-inline fun <reified TL : NodeBase, TR : NodeBase> GDbBuilder.makeReverseIndex(
+inline fun <reified TL : NodeBase, TR : NodeBase> GDbBuilder.reverseReverseIndex(
   name: String,
   crossinline view: (GRef<TL>, TL, MutableCollection<GRef<TR>>) -> Unit?,
-): GIndex<GRef<TR>, TL> = makeIndexRawGRef<TR>(name) { r, v, c ->
+): GIndex<GRef<TR>, TL> = reverseIndexRawGRef<TR>(name) { r, v, c ->
   (v as? TL)?.let { view(r as GRef<TL>, it, c) }
 } as GIndex<GRef<TR>, TL>
 
@@ -118,9 +123,6 @@ interface GDbBuilder {
   suspend fun build(): GDb
 
 
-  //needed for Indexes that want to index refs
-  fun <T : NodeBase> grefSerializer(): KSerializer<GRef<T>>
-
   //name must be unique among all indexes in GDb
   // view defines relationship; view is run for ALL nodes in db, after each CHANGE of that node (including add)
   // index.find(TR) returns all TL that returned the TR
@@ -132,9 +134,16 @@ interface GDbBuilder {
 //    view: (GRef<*>, NodeBase, MutableCollection<TR>) -> Unit?,
 //  ): GIndex<TR, *>
 
-  //TODO: change these to ENSURE index, and also do somehow ensure it fully reflects latest state...?
+  //TODO: change these (names) to ENSURE index, and also do somehow ensure it fully reflects latest state...?
 
-  fun <TR : Any> makeIndexRawStr(
+  // REVERSE because: creates index that is reverse (/inverse?) of the VIEW FN
+  // (technically, it returns the refs, not the Node obj, so not 100% inverse, but essentially)
+  // (also, it returns for ANY in rslt-set ALL who returned it... so even less reverse...)
+  // (... idk. I like the name, but if there is better, I will change it)
+  // ! in a GRAPH - view provides FORWARD edges -- REVERSE edges are computed by the index
+  // view must be a PURE function (as in, always "returns" the same set, purely derived by Node)
+
+  fun <TR : Any> reverseIndexRawStr(
     name: String,
     seri: (TR) -> String,
     //ret null == this ref is never indexed (not just empty in this case)
@@ -142,7 +151,7 @@ interface GDbBuilder {
     view: (GRef<*>, NodeBase, MutableCollection<TR>) -> Unit?,
   ): GRangeIndex<TR, *>
 
-  fun <TR : Any> makeIndexRawLong(
+  fun <TR : Any> reverseIndexRawLong(
     name: String,
     seri: (TR) -> Long,
     //ret null == this ref is never indexed (not just empty in this case)
@@ -150,7 +159,7 @@ interface GDbBuilder {
     view: (GRef<*>, NodeBase, MutableCollection<TR>) -> Unit?,
   ): GRangeIndex<TR, *>
 
-  fun <TR : NodeBase> makeIndexRawGRef(
+  fun <TR : NodeBase> reverseIndexRawGRef(
     name: String,
     //ret null == this ref is never indexed (not just empty in this case)
     //if returns null, must not add to coll
@@ -187,6 +196,31 @@ interface GDbBuilder {
     //run for each TN that changes
     trigger: suspend GDbTx.(GRef<NodeBase>) -> Unit,
   )
+}
+
+//runs build WITHOUT requiring SUSPENDING fn
+// - returns a DELEGATE GDb, where each call first awaits the built
+// - this is useful, if you need to call build() in a CONTRUCTOR of a wrapper class
+fun GDbBuilder.buildBg(scope: CoroutineScope): GDb {
+  val built = scope.async { build() }
+  return object : GDb {
+    override suspend fun <T> read(block: suspend GDbSnap.() -> T): T {
+      return built.await().read(block)
+    }
+
+    override suspend fun <T> mutate(block: suspend GDbTx.() -> T): T {
+      return built.await().mutate(block)
+    }
+
+    override fun <T : NodeBase> subscription(ref: GRef<T>): Flow<T?> {
+      return flow { emitAll(built.await().subscription(ref)) }
+    }
+
+    override fun <T> subscription(block: suspend GDbSnap.() -> T): Flow<T> {
+      return flow { emitAll(built.await().subscription(block)) }
+    }
+  }
+
 }
 
 //represents a GRAPH of nodes
@@ -226,8 +260,15 @@ interface GDbSnap {
 
   //null if not in graph
   fun <T : NodeBase> deref(ref: GRef<T>): T?
+
+  //final
+  //cannot be defined as extension, since it's using it
+  fun <T : NodeBase> GRef<T>.deref(): T? = deref(this)
 }
 
+// NOT THREAD SAFE - It is your responsibility to not access it concurrently WITHIN one transaction.
+// - separate transactions are independent - that is fine
+// - must not be used after mutate{} completes
 interface GDbTx : GDbSnap {
   //creates a node with NEW ID
   fun <T : NodeBase> insertNew(node: T): GRef<T>

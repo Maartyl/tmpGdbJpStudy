@@ -24,7 +24,6 @@ repositories {
 
 dependencies {
   implementation(project("gdbapi"))
-  implementation(project("gdbxseri"))
 
   implementation(project("gdbjxm"))
   implementation(project("jpModel"))
@@ -33,12 +32,8 @@ dependencies {
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.0-RC")
   implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.3.4")
 
+  //useful for EDITING manually of data - can just make json, manually edit, save
   //implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.1")
-
-  //JVM impl
-  implementation("org.mapdb:mapdb:3.0.8")
-  //useful collections; already used inside mapdb == no extra dep
-  implementation("com.google.guava:guava:31.0.1-jre")
 }
 
 allprojects {

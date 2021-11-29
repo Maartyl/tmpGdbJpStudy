@@ -7,7 +7,6 @@ pluginManagement {
 
 }
 rootProject.name = "jpDepStudy"
-include("gdbxseri")
 
 //gdb impl : Java kotlinX-seri MapDB
 include("gdbjxm")

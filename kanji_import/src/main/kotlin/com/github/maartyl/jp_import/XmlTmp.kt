@@ -3,8 +3,8 @@ package com.github.maartyl.jp_import
 import com.github.maartyl.gdb.GDb
 import com.github.maartyl.gdb.GDbBuilder
 import com.github.maartyl.gdb.jxm.gdbJxmOpen
-import com.github.maartyl.gdb.makeIndexLong
-import com.github.maartyl.gdb.makeIndexStr
+import com.github.maartyl.gdb.reverseIndexLong
+import com.github.maartyl.gdb.reverseIndexStr
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -36,13 +36,13 @@ class GKDic2(builder: GDbBuilder) {
 
   val prim = builder.primaryIndex<Kanjidic2>("Kanjidic2") { it.lit }
 
-  val ids = builder.makeIndexStr<Kanjidic2, String>("kdic2ids", { it }) { k, v, c ->
+  val ids = builder.reverseIndexStr<Kanjidic2, String>("kdic2ids", { it }) { k, v, c ->
     v.ids.let { c.addAll(it) }
     Unit
   }
 
-  val hasVariants = builder.makeIndexLong<Kanjidic2, Unit>("kdic2variants", { 1 }) { k, v, c ->
-    v.variants.let { c.add(Unit) }
+  val hasVariants = builder.reverseIndexLong<Kanjidic2, Unit>("kdic2variants", { 1 }) { k, v, c ->
+    v.variantsIds.let { c.add(Unit) }
     Unit
   }
 

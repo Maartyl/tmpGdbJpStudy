@@ -12,7 +12,7 @@ internal class PrimaryStrIndexImpl<TN : NodeBase>(
   val keyView: (TN) -> String,
 ) : GPrimaryStrIndex<TN> {
 
-  fun escapeKey(key: String): String {
+  private fun escapeKey(key: String): String {
     //probably way too expensive, but fine for now
     return key.replace(forbiddenRegex) {
       when (it.value[0]) {

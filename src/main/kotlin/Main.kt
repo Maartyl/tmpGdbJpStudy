@@ -11,8 +11,6 @@ import com.github.maartyl.jpmodel.Test1
 import com.github.maartyl.jpmodel.Test2
 import com.github.maartyl.jpmodel.Test3
 import com.github.maartyl.jpmodel.TestSeri
-import com.github.maartyl.kxs.testXSer
-import com.github.maartyl.testmapdb.test1
 import kotlinx.coroutines.*
 import org.mapdb.DBMaker
 
@@ -31,10 +29,6 @@ fun App() {
 }
 
 fun main() = application {
-  remember {
-    test1()
-    testXSer()
-  }
   LaunchedEffect(Unit) {
     withContext(Dispatchers.IO) {
       val db = DBMaker.fileDB("tmpMapDB")

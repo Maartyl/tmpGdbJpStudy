@@ -4,7 +4,6 @@ import com.github.maartyl.gdb.*
 import com.google.common.collect.MapMaker
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -194,18 +193,28 @@ internal class GDbImpl(
   val ioDispatcher: CoroutineDispatcher,
 ) : GDb, GDbBuilder, CoroutineScope {
 
+  //TOUP: save Thread reference and ONLY allow build calls from that thread
+  private var isBuilding = true
   private var isBuilt = false
   override suspend fun build(): GDb {
-    isBuilt = true
+    checkBuilding()
+    isBuilding = false
+    rw.commit()
     //TODO: run mem-reindexing
+    isBuilt = true
     return this
   }
 
   private fun checkBuilding() {
-    if (isBuilt) error("GDb already built.")
+    if (!isBuilding) error("GDb already built.")
+  }
+
+  private fun checkBuilt() {
+    if (!isBuilt) error("GDb not built yet.")
   }
 
   //val weakRefs = mutableMapOf<Long, WeakReference<Ref<*>>>()
+  //refs hold ref to latest Node obj - if nobody holds ref to it: don't keep it in memory
   private val weakRefs = MapMaker().weakValues().makeMap<String, Ref<*>>()
 
   private fun internRefUntyped(id: String): Ref<*> {
@@ -257,37 +266,49 @@ internal class GDbImpl(
 
   val chngo = ChangeDispatcher(this)
 
-  override fun <T : NodeBase> grefSerializer(): KSerializer<GRef<T>> {
-    @Suppress("UNCHECKED_CAST")
-    return grefSeri as KSerializer<GRef<T>>
-  }
+  //for checking while building, so none overlap
+  val tmpIndexNames = mutableSetOf<String>()
 
-  override fun <TR : Any> makeIndexRawStr(
+  override fun <TR : Any> reverseIndexRawStr(
     name: String,
     seri: (TR) -> String,
     view: (GRef<*>, NodeBase, MutableCollection<TR>) -> Unit?
   ): GRangeIndex<TR, *> {
+    checkBuilding()
+    if (name in tmpIndexNames) error("Repeated index name: $name")
+    tmpIndexNames.add(name)
     return multiIndexStr<TR, NodeBase>(this, name, view, seri).also {
       chngo.register(it)
     }
   }
 
-  override fun <TR : Any> makeIndexRawLong(
+  override fun <TR : Any> reverseIndexRawLong(
     name: String,
     seri: (TR) -> Long,
     view: (GRef<*>, NodeBase, MutableCollection<TR>) -> Unit?
   ): GRangeIndex<TR, *> {
+    checkBuilding()
+    if (name in tmpIndexNames) error("Repeated index name: $name")
+    tmpIndexNames.add(name)
     return multiIndexLong<TR, NodeBase>(this, name, view, seri).also {
       chngo.register(it)
     }
   }
 
-  override fun <TR : NodeBase> makeIndexRawGRef(
+  override fun <TR : NodeBase> reverseIndexRawGRef(
     name: String,
     view: (GRef<*>, NodeBase, MutableCollection<GRef<TR>>) -> Unit?
-  ): GIndex<GRef<TR>, *> = makeIndexRawStr(name, { it.asRef.id }, view)
+  ): GIndex<GRef<TR>, *> = run {
+    checkBuilding()
+    if (name in tmpIndexNames) error("Repeated index name: $name")
+    tmpIndexNames.add(name)
+    reverseIndexRawStr(name, { it.asRef.id }, view)
+  }
 
   override fun <TN : NodeBase> primaryIndex(name: String, id: (TN) -> String): GPrimaryStrIndex<TN> {
+    checkBuilding()
+    if (name in tmpIndexNames) error("Repeated index name: $name")
+    tmpIndexNames.add(name)
     return PrimaryStrIndexImpl(this, name, id)
   }
 
@@ -332,11 +353,8 @@ internal class GDbImpl(
     TxImpl(this@GDbImpl, null).runTx(block)
   }
 
-  //cannot be SharedFlow
-  //TODO: how to "throw" if scope ends etc?
-  // I guess it would be best to take SCOPE as arg? ...or return just Flow
-  // - but then they couldn't return the same inst for all... probably fine, though?
-  //  - after all: this is chpep, and it's not possible for the other anyway
+  //cannot be SharedFlow - I could have a MAP of them, and un/register them as collectorsCount changes, but not worth it
+  //  - after all: this is cheap, and it's not possible for the other subscription() anyway
   override fun <T : NodeBase> subscription(ref: GRef<T>): Flow<T?> {
     //TOUP: cheaper implementation - direct ChangeListener - pass new value
     // - WAIT: cannot if TX !! - still must enqueue itself for end of TX, but still faster
@@ -347,14 +365,12 @@ internal class GDbImpl(
       awaitClose {
         chngo.unregister(co)
       }
-    }.buffer(1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-
+    }.conflate()
+    //.buffer(1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
   }
 
-  //cannot be SharedFlow
-  //TODO:DAMMIT: SharedFlow does not forward exceptions?
-  // I guess it would be best to take SCOPE as arg? ...or return just Flow
-  // ...shared is kind of nonsense here... should just return Flow?
+  //cannot be SharedFlow - each block needs own, and I will "never" get the same twice anyway
+  // ALSO: SharedFlow does not forward EXCEPTIONS; and needs scope and ....
   override fun <T> subscription(block: suspend GDbSnap.() -> T): Flow<T> {
 
     return flow {

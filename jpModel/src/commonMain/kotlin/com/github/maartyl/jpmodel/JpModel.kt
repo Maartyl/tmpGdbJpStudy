@@ -22,18 +22,21 @@ data class JpKanji(
   val parts: List<GRef<PartOfKanji>>,
 ) : PartOfKanji, PartOfWord
 
-data class JpConcept(
-  val meaning: String,
+//TODO: Concepts - too complicated, not useful enough
+// - also: different shape than all existing dictionary data
 
-  //should have one main writing, and then alternative writings ?
-)
-
-
-data class JpKanjiConcept(
-  val meaning: String,
-
-  //should have one main writing, and then alternative writings ?
-)
+//data class JpConcept(
+//  val meaning: String,
+//
+//  //should have one main writing, and then alternative writings ?
+//)
+//
+//
+//data class JpKanjiConcept(
+//  val meaning: String,
+//
+//  //should have one main writing, and then alternative writings ?
+//)
 
 //TODO: keep IMPORTANCE for each word - not just for "initial" order
 // - also to choose which to study first, if many "waiting"
@@ -77,9 +80,9 @@ data class LeWordReading(
   override val leProgress: LeProgress,
 ) : ILe
 
-// PartOfWord
-//a meaning of a kanji, or kanji+kana suffix
-// or maybe even a "general" pure kana word (used in other words)
-data class LeConcept(
-  override val leProgress: LeProgress,
-) : ILe
+//// PartOfWord
+////a meaning of a kanji, or kanji+kana suffix
+//// or maybe even a "general" pure kana word (used in other words)
+//data class LeConcept(
+//  override val leProgress: LeProgress,
+//) : ILe

@@ -12,7 +12,7 @@ internal open class SnapImpl(
 ) : GDbSnap {
 
   override fun <T : NodeBase> deref(ref: GRef<T>): T? {
-    val r = ref as? Ref<T> ?: error("bad Ref $ref")
+    val r = ref.asRef
     seen?.add(r)
 
     return r.cachedNode ?: g.nodesGet(r).also {
