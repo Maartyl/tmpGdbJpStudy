@@ -44,12 +44,12 @@ fun main() = application {
         val ti = insertNew(Test1("asd0"))
         val a = insertNew(Test2("beheme", 554))
 
-        println("$a :deref: ${deref(a)}")
+        println("$a :deref: ${a.deref()}")
 
         val b = insertNew(Test3("qq", ti))
         println(
-          "$b :deref: ${deref(b)} ; was $ti :deref: ${deref(ti)} ; is ${
-            deref(b)?.ti?.let { deref(it) }
+          "$b :deref: ${b.deref()} ; was $ti :deref: ${ti.deref()} ; is ${
+            b.deref()?.ti?.let { it.deref() }
           }"
         )
       }

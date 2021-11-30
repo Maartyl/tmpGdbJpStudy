@@ -11,16 +11,21 @@ internal open class SnapImpl(
   private val seen: MutableSet<Ref<*>>?,
 ) : GDbSnap {
 
-  override fun <T : NodeBase> deref(ref: GRef<T>): T? {
-    val r = ref.asRef
+  override suspend fun <T : NodeBase> GRef<T>.deref(): T? {
+    val r = asRef
     seen?.add(r)
 
-    return r.cachedNode ?: g.nodesGet(r).also {
-      r.cachedNode = it
-    }
+    return r.cachedNode ?: g.nodesGetAndCache(r)
   }
 
 }
+
+//TODO: pass in scope: how long usabe for + allows starting stuff, etc...
+// - probably should be "inner" scope: commit AFTER the scope completes
+// - so secondary "outer" scope, that also includes commit
+// - commit needs to wait, until all "inner" children completed
+// - it really would be best, if it could be part of coroutineScope inside block...
+// -- but any async updates (like reindexing, triggers ...) need to run in that
 
 internal class TxImpl(
   g: GDbImpl,
@@ -31,6 +36,8 @@ internal class TxImpl(
   suspend fun <T> runTx(block: suspend GDbTx.() -> T): T = try {
     g.chngo.txStart(this)
     block().also {
+      //TODO: instead do REQUESTS for passes and LOOP
+      // e.g. isPerformIndexesRequested
       g.chngo.txPreCommit(this)
       g.rw.commit()
       //TODO: what if throws here ? - probably should not run Rollback stuff, at least?
@@ -51,24 +58,16 @@ internal class TxImpl(
     return g.internRef("%(${g.nodeIdGen.andIncrement.toString(Character.MAX_RADIX)})")
   }
 
-  override fun <T : NodeBase> insertNew(node: T): GRef<T> {
-    return genRef<T>().also { put(it, node) }
+  override suspend fun <T : NodeBase> insertNew(node: T): GRef<T> {
+    return genRef<T>().also { it.put(node) }
   }
 
-  override fun <T : NodeBase> put(ref: GRef<T>, node: T?) {
-
-    //TODO: use single db SWAP (get and set) instead of loading old value, then storing new
-    // - (for times, when not already cached inside Ref)
-    //TODO: do I actually need old value? - oh, yeah! I do, for indexes.
-    // ... actually, that might be kinda bad: if some mistake... would it not better to use real DB state?
-    // - not just bad: impossible - the forward direction is not stored - impossible without deriving from node
-    val old = deref(ref)
-    val r = ref.asRef
-    g.nodesPut(r, node)
-
-    r.updated(node)
-    // - only fully invalidate if ROLLBACK
-
+  //  //MAY returns previous value, like map.put would -- may be confusing; not sure yet
+//  // - name it swap maybe... putSwap
+  override suspend fun <T : NodeBase> GRef<T>.put(node: T?) {
+    val r = asRef
+    val old = g.nodesPutSwap(r, node)
+    r.cacheLatest(node) // - only fully invalidate if ROLLBACK
     changes.add(r)
     doNodeChanged(r, old, node)
   }

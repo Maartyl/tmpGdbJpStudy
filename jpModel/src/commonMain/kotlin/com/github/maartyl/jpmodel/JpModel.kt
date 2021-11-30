@@ -1,9 +1,14 @@
 package com.github.maartyl.jpmodel
 
 import com.github.maartyl.gdb.GRef
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 //base interface for all nodes - Jp learning
 sealed interface JlNode
+
+@Serializable
+sealed class JLNode : JlNode
 
 //not everyone that implements this is part of a kanji
 //but those who do NOT implement this CANNOT be
@@ -13,14 +18,38 @@ sealed interface PartOfKanji : JlNode
 //kanji or concept?
 sealed interface PartOfWord : JlNode
 
-data class JpRadical(
+@Serializable
+@SerialName("jpR")
+data class RadicalC(
   val text: String,
-) : PartOfKanji
+) : JLNode(), PartOfKanji
 
-data class JpKanji(
+@Serializable
+@SerialName("waniRadi")
+data class RadicalWani(
+  val text: String,
+) : JLNode(), PartOfKanji
+
+@Serializable
+@SerialName("jpK")
+data class Kanji(
+  val lit: String,
+  //TODO: is it ordered? or a set?
+  val parts: List<GRef<PartOfKanji>>,
+) : JLNode(), PartOfKanji, PartOfWord
+
+//KanjiGlyph ... do I want those?
+
+@Serializable
+@SerialName("jpW")
+data class Word(
   val text: String,
   val parts: List<GRef<PartOfKanji>>,
-) : PartOfKanji, PartOfWord
+) : JLNode(), PartOfWord
+//TODO: is Word a PartOfWord ? ... I guess a word can contain another word
+// - but do I want that?
+// - in this case it should NOT be just substring, but really the 'concept'
+
 
 //TODO: Concepts - too complicated, not useful enough
 // - also: different shape than all existing dictionary data
@@ -57,7 +86,7 @@ data class LeProgress(
 //also simple phrases
 data class LeRadiMeaning(
   override val leProgress: LeProgress,
-  val radi: GRef<JpRadical>
+  val radi: GRef<RadicalC>
 ) : ILe
 
 //usually: uses CONCEPTS

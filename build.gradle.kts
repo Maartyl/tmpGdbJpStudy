@@ -6,7 +6,7 @@ plugins {
   //kotlin("jvm") version "1.6.0"
   kotlin("jvm") version "1.5.31" //kept back for Compose
 
-  id("org.jetbrains.compose") version "1.0.0-rc5"
+  id("org.jetbrains.compose") version "1.0.0-rc6"
 
   //CANNOT use serialization together with compose in the same module (bug)
   // - if needed: need 2 separate modules, one with seri, one with compose

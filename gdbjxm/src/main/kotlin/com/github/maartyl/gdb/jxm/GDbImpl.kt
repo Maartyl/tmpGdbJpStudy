@@ -103,7 +103,7 @@ class Ref<T : NodeBase>(
     cachedNode = null
   }
 
-  fun updated(node: T?) {
+  fun cacheLatest(node: T?) {
     cachedNode = node
   }
 }
@@ -245,21 +245,36 @@ internal class GDbImpl(
     .createOrOpen()
 
   @Suppress("UNCHECKED_CAST")
-  fun <T : NodeBase> nodesGet(ref: Ref<T>): T? {
-    return nodes[ref.id]?.let {
+  suspend fun <T : NodeBase> nodesGetAndCache(ref: Ref<T>): T? {
+    return withContext(ioDispatcher) { nodes[ref.id] }?.let {
       @OptIn(ExperimentalSerializationApi::class)
       proto.decodeFromByteArray(nodeSeri, it) as T
-    }
+    }.also { ref.cacheLatest(it) }
   }
 
+  //PUT and GET OLD
   @Suppress("UNCHECKED_CAST")
-  fun <T : NodeBase> nodesPut(ref: Ref<T>, node: T?) {
-    if (node == null) {
-      nodes.remove(ref.id)
+  suspend fun <T : NodeBase> nodesPutSwap(ref: Ref<T>, node: T?): T? {
+    //assumes called BEFORE ref updated -- cachedNode still valid
+    val oldSerNode = if (node == null) {
+      withContext(ioDispatcher) {
+        nodes.remove(ref.id)
+      }
     } else {
+      val nodeBase: NodeBase = node
+
       @OptIn(ExperimentalSerializationApi::class)
-      nodes[ref.id] = proto.encodeToByteArray(nodeSeri as KSerializer<T>, node)
+      val serNode = proto.encodeToByteArray(nodeSeri as KSerializer<NodeBase>, nodeBase)
+
+      withContext(ioDispatcher) {
+        //there is no way to NOT deserialize old value (when already in cachedNode)
+        nodes.put(ref.id, serNode)
+      }
     }
+    return if (oldSerNode == null) null else
+      @OptIn(ExperimentalSerializationApi::class)
+      ref.cachedNode ?: proto.decodeFromByteArray(nodeSeri, oldSerNode) as T
+
   }
 
   val nodeIdGen = rw.atomicLong(C.NODE_ID_GEN).createOrOpen()

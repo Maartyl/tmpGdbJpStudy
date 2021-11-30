@@ -7,9 +7,7 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.produce
 import kotlinx.coroutines.channels.trySendBlocking
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.*
 import kotlinx.serialization.Serializable
 import org.xml.sax.Attributes
 import org.xml.sax.SAXParseException
@@ -248,7 +246,7 @@ fun processKanjidic2(kg: XGroup): Kanjidic2 {
           strokeCount = e.rq.toInt()
         } else {
           //curious only
-          println("strokeCount: $lit")
+          //println("strokeCount: $lit")
         }
       }
 
@@ -612,32 +610,40 @@ suspend fun GdbImporting.findVariants() = withContext(Dispatchers.Default) {
 
   mutate {
     println("mut-start:")
+    println("FOOX:${System.currentTimeMillis()}")
+    //coroutineScope {
     readKanjidic2(tmpPath.pathString).collect {
+      //launch {
       put(kdic2.prim, it)
-      println("mut-put: ${it.lit}")
+      //}
+      //put(kdic2.prim, it)
+      //println("mut-put: ${it.lit}")
     }
+    //}
+    println("FOOA:${System.currentTimeMillis()}")
   }
 
   println("mut-done")
+  println("FOOB:${System.currentTimeMillis()}")
 
   mutate {
     for (knRef in kdic2.hasVariants.find(this, Unit)) {
-      val kn = deref(knRef)
+      val kn = knRef.deref()
 
       if (kn == null) {
         println("kn-null: $knRef")
       } else
 
         launch {
-          val all = kn.variantsIds.flatMap { vid ->
-            kdic2.ids.find(this@mutate, vid).mapNotNull { vvRef ->
-              val vv = deref(vvRef)
+          val all = kn.variantsIds.asFlow().flatMapConcat { vid ->
+            kdic2.ids.find(this@mutate, vid).asFlow().mapNotNull { vvRef ->
+              val vv = vvRef.deref()
               if (vv == null) {
                 println("vv-null: $vvRef under ${kn.lit}")
               }
               vv
             }.map { "${it.lit} (${vid})" }
-          }
+          }.toList()
 
           if (all.isNotEmpty())
 

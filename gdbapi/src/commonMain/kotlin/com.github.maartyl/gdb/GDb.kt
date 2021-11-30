@@ -78,9 +78,9 @@ interface GPrimaryStrIndex<TN : NodeBase> : GIndex<String, TN> {
 //  }
 }
 
-fun <TN : NodeBase> GDbTx.put(idx: GPrimaryStrIndex<TN>, node: TN): GRef<TN> {
+suspend fun <TN : NodeBase> GDbTx.put(idx: GPrimaryStrIndex<TN>, node: TN): GRef<TN> {
   //acts as insertOrReplace
-  return idx.deriveRef(idx.primaryKeyOf(node)).also { put(it, node) }
+  return idx.deriveRef(idx.primaryKeyOf(node)).also { it.put(node) }
 }
 
 
@@ -192,6 +192,7 @@ interface GDbBuilder {
   //btw.: if trigger makes changes, those can in turn cause MORE triggers to be enqueued
   // - potentially infinite??
   //all triggers run queued at the END of a TX (but if update fails, TX fails)
+  //TOUP: pass special GDbSnapTig .mutate{} - so many triggers can be started in parallel
   fun addTriggerRaw(
     //run for each TN that changes
     trigger: suspend GDbTx.(GRef<NodeBase>) -> Unit,
@@ -259,24 +260,29 @@ interface GDb {
 interface GDbSnap {
 
   //null if not in graph
-  fun <T : NodeBase> deref(ref: GRef<T>): T?
+  suspend fun <T : NodeBase> GRef<T>.deref(): T?
 
   //final
   //cannot be defined as extension, since it's using it
-  fun <T : NodeBase> GRef<T>.deref(): T? = deref(this)
+//  @JvmName("derefExt")
+//  fun <T : NodeBase> GRef<T>.deref(): T? = deref(this)
 }
+
+suspend inline fun <T : NodeBase> GDbSnap.deref(ref: GRef<T>) = ref.deref()
 
 // NOT THREAD SAFE - It is your responsibility to not access it concurrently WITHIN one transaction.
 // - separate transactions are independent - that is fine
 // - must not be used after mutate{} completes
 interface GDbTx : GDbSnap {
   //creates a node with NEW ID
-  fun <T : NodeBase> insertNew(node: T): GRef<T>
+  suspend fun <T : NodeBase> insertNew(node: T): GRef<T>
 
   //MAYBE: better name
   //inserts or updates or removes
-  fun <T : NodeBase> put(ref: GRef<T>, node: T?)
+  suspend fun <T : NodeBase> GRef<T>.put(node: T?)
 }
+
+suspend inline fun <T : NodeBase> GDbTx.put(ref: GRef<T>, node: T?) = ref.put(node)
 
 
 @OptIn(ExperimentalSerializationApi::class)
