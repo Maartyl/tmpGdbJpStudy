@@ -4,6 +4,7 @@ import com.github.maartyl.gdb.GDbSnap
 import com.github.maartyl.gdb.GRangeIndex
 import com.github.maartyl.gdb.GRef
 import com.github.maartyl.gdb.NodeBase
+import kotlinx.coroutines.launch
 import org.mapdb.DataInput2
 import org.mapdb.DataOutput2
 import org.mapdb.Serializer
@@ -64,18 +65,23 @@ internal class MultiIndex<Key : Any, KeyB : Comparable<KeyB>, Node : NodeBase>(
 
   private fun pack(k: Key, ref: Ref<*>) = KR<KeyB>(bs(k), ref.id)
 
-  //TODO: how is equals implemented for lists? - may be wrong? - INDEED it needs Arrays.equals - differs
-  // NOPE! a.equals(b) is FALSE even if contents the same
   private val txToAdd = mutableSetOf<KR<KeyB>>()
   private val txToRemove = mutableSetOf<KR<KeyB>>()
   override fun txPreCommit(tx: TxImpl) {
-    multimap.addAll(txToAdd)
-    multimap.removeAll(txToRemove)
-    txToAdd.clear()
-    txToRemove.clear()
+    val any = synchronized(this@MultiIndex) { txToAdd.isNotEmpty() || txToRemove.isNotEmpty() }
+    if (any) //TODO: one day, this will probably be taking a smaller scope, but for now fine
+      tx.scopeMut.launch(g.ioDispatcher) {
+        synchronized(this@MultiIndex) {
+          multimap.addAll(txToAdd)
+          multimap.removeAll(txToRemove)
+          txToAdd.clear()
+          txToRemove.clear()
+        }
+      }
   }
 
-  private fun add(k: Key, ref: Ref<*>) {
+  //ASSUMES synchronized
+  private fun add(k: Key, ref: Ref<*>) /*= synchronized(this)*/ {
     val p = pack(k, ref)
     txToRemove.remove(p) //if previous change in this tx was removing it - cancel
     txToAdd.add(p)
@@ -83,7 +89,8 @@ internal class MultiIndex<Key : Any, KeyB : Comparable<KeyB>, Node : NodeBase>(
     // (as no other node could have created it)
   }
 
-  private fun remove(k: Key, ref: Ref<*>) {
+  //ASSUMES synchronized
+  private fun remove(k: Key, ref: Ref<*>) /*= synchronized(this)*/ {
     val p = pack(k, ref)
     txToAdd.remove(p) //if previous change in this tx was adding it - cancel
     txToRemove.add(p)
@@ -108,16 +115,18 @@ internal class MultiIndex<Key : Any, KeyB : Comparable<KeyB>, Node : NodeBase>(
     // - if ANY node requires false for the same ref, then NONE are required to be indexed
     if (!oldMay || !newMay) return
 
-    if (oldFwd.isNotEmpty())
-      for (ok in oldFwd) {
-        if (ok !in newFwd)
-          remove(ok, ref)
-      }
-    if (newFwd.isNotEmpty())
-      for (nk in newFwd) {
-        if (nk !in oldFwd)
-          add(nk, ref)
-      }
+    synchronized(this) {
+      if (oldFwd.isNotEmpty())
+        for (ok in oldFwd) {
+          if (ok !in newFwd)
+            remove(ok, ref)
+        }
+      if (newFwd.isNotEmpty())
+        for (nk in newFwd) {
+          if (nk !in oldFwd)
+            add(nk, ref)
+        }
+    }
   }
 
   //TODO: notify INDEX key CHANGE to g -- for SUBSCRIBE

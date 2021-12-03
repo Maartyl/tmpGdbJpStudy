@@ -87,7 +87,7 @@ suspend fun <TN : NodeBase> GDbTx.put(idx: GPrimaryStrIndex<TN>, node: TN): GRef
 @Suppress("UNCHECKED_CAST")
 inline fun <reified TL : NodeBase, TR : Any> GDbBuilder.reverseIndexStr(
   name: String, noinline seri: (TR) -> String,
-  crossinline view: (GRef<TL>, TL, MutableCollection<TR>) -> Unit?,
+  crossinline view: (GRef<TL>, TL, MutableCollection<TR>) -> Unit,
 ): GRangeIndex<TR, TL> = reverseIndexRawStr<TR>(name, seri) { r, v, c ->
   (v as? TL)?.let { view(r as GRef<TL>, it, c) }
 } as GRangeIndex<TR, TL>
@@ -95,7 +95,7 @@ inline fun <reified TL : NodeBase, TR : Any> GDbBuilder.reverseIndexStr(
 @Suppress("UNCHECKED_CAST")
 inline fun <reified TL : NodeBase, TR : Any> GDbBuilder.reverseIndexLong(
   name: String, noinline seri: (TR) -> Long,
-  crossinline view: (GRef<TL>, TL, MutableCollection<TR>) -> Unit?,
+  crossinline view: (GRef<TL>, TL, MutableCollection<TR>) -> Unit,
 ): GRangeIndex<TR, TL> = reverseIndexRawLong<TR>(name, seri) { r, v, c ->
   (v as? TL)?.let { view(r as GRef<TL>, it, c) }
 } as GRangeIndex<TR, TL>
@@ -103,7 +103,7 @@ inline fun <reified TL : NodeBase, TR : Any> GDbBuilder.reverseIndexLong(
 @Suppress("UNCHECKED_CAST")
 inline fun <reified TL : NodeBase, TR : NodeBase> GDbBuilder.reverseReverseIndex(
   name: String,
-  crossinline view: (GRef<TL>, TL, MutableCollection<GRef<TR>>) -> Unit?,
+  crossinline view: (GRef<TL>, TL, MutableCollection<GRef<TR>>) -> Unit,
 ): GIndex<GRef<TR>, TL> = reverseIndexRawGRef<TR>(name) { r, v, c ->
   (v as? TL)?.let { view(r as GRef<TL>, it, c) }
 } as GIndex<GRef<TR>, TL>

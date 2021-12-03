@@ -361,11 +361,11 @@ internal class GDbImpl(
   }
 
   override suspend fun <T> read(block: suspend GDbSnap.() -> T): T = execEnqueue(readOnly = true) {
-    SnapImpl(this@GDbImpl, null).block()
+    SnapImpl(this@GDbImpl, this, null).block()
   }
 
   override suspend fun <T> mutate(block: suspend GDbTx.() -> T): T = execEnqueue(readOnly = false) {
-    TxImpl(this@GDbImpl, null).runTx(block)
+    TxImpl(this@GDbImpl, this, seen = null).runTx(block)
   }
 
   //cannot be SharedFlow - I could have a MAP of them, and un/register them as collectorsCount changes, but not worth it
@@ -411,7 +411,7 @@ internal class GDbImpl(
         val toEmit = execEnqueue(readOnly = true) {
           obs.changeSeen.value = false
           obs.toLookOutFor.clear()
-          SnapImpl(this@GDbImpl, obs.toLookOutFor).block()
+          SnapImpl(this@GDbImpl, this, obs.toLookOutFor).block()
         }
         emit(toEmit)
 
