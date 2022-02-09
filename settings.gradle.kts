@@ -8,8 +8,8 @@ pluginManagement {
 }
 rootProject.name = "jpDepStudy"
 
-//gdb impl : Java kotlinX-seri MapDB
-include("gdbjxm")
-include("gdbapi")
 include("jpModel")
 include("kanji_import")
+
+//for group: com.github.maartyl.gdb
+includeBuild("../maa-gdb")

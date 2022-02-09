@@ -22,7 +22,8 @@ kotlin {
     val commonMain by getting {
       dependencies {
         implementation(kotlin("stdlib-common"))
-        implementation(project(":gdbapi"))
+        //implementation(project(":gdbapi"))
+        implementation("com.github.maartyl.gdb:gdbapi:+")
       }
     }
     val commonTest by getting {

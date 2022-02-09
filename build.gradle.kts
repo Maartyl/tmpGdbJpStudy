@@ -4,9 +4,9 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
   //kotlin("jvm") version "1.6.0"
-  kotlin("jvm") version "1.5.31" //kept back for Compose
+  kotlin("jvm") version "1.6.10"
 
-  id("org.jetbrains.compose") version "1.0.0-rc6"
+  id("org.jetbrains.compose") version "1.0.1"
 
   //CANNOT use serialization together with compose in the same module (bug)
   // - if needed: need 2 separate modules, one with seri, one with compose
@@ -23,13 +23,16 @@ repositories {
 }
 
 dependencies {
-  implementation(project("gdbapi"))
+  //implementation(project("gdbapi"))
+  //implementation(project("gdbjxm"))
 
-  implementation(project("gdbjxm"))
+  implementation("com.github.maartyl.gdb:gdbapi:+")
+  implementation("com.github.maartyl.gdb:gdbjxm:+")
+
   implementation(project("jpModel"))
 
   implementation(compose.desktop.currentOs)
-  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.0-RC")
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.0")
   implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.3.4")
 
   //useful for EDITING manually of data - can just make json, manually edit, save
@@ -42,9 +45,10 @@ allprojects {
     kotlinOptions.freeCompilerArgs += arrayOf("-Xopt-in=kotlin.RequiresOptIn")
   }
 
-//  kotlin.sourceSets.all {
-//    languageSettings.optIn("kotlin.RequiresOptIn")
-//  }
+  if (extensions.findByName("kotlin") != null)
+    kotlin.sourceSets.all {
+      languageSettings.optIn("kotlin.RequiresOptIn")
+    }
 }
 
 compose.desktop {
