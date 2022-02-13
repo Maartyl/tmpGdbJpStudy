@@ -1,6 +1,8 @@
 package com.github.maartyl.jp_import
 
+import com.github.maartyl.gdb.GPut
 import com.github.maartyl.gdb.GRef
+import com.github.maartyl.gdb.find
 import com.github.maartyl.gdb.put
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -50,7 +52,7 @@ data class Kanjidic2(
   val readingsOn: Set<String>,
 
 
-  ) : GImporting()
+  ) : GImporting(), GPut
 
 
 class Kanjidic2SaxHandler(private val out: SendChannel<XGroup>) : DefaultHandler() {
@@ -626,9 +628,9 @@ suspend fun GdbImporting.findVariants() = withContext(Dispatchers.Default) {
   println("mut-done")
   println("FOOB:${System.currentTimeMillis()}")
 
-  mutate {
-    for (knRef in kdic2.hasVariants.find(this, Unit)) {
-      val kn = knRef.deref()
+  read {
+    kdic2.hasVariants.find(this).collect { knRef ->
+      val kn = derefImpl(knRef)
 
       if (kn == null) {
         println("kn-null: $knRef")
@@ -636,8 +638,8 @@ suspend fun GdbImporting.findVariants() = withContext(Dispatchers.Default) {
 
         launch {
           val all = kn.variantsIds.asFlow().flatMapConcat { vid ->
-            kdic2.ids.find(this@mutate, vid).asFlow().mapNotNull { vvRef ->
-              val vv = vvRef.deref()
+            kdic2.ids.find(this@read, vid).mapNotNull { vvRef ->
+              val vv = derefImpl(vvRef)
               if (vv == null) {
                 println("vv-null: $vvRef under ${kn.lit}")
               }
